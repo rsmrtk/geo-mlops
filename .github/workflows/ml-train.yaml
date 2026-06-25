@@ -13,28 +13,79 @@ on:
 jobs:
   train:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: ml/requirements.txt
+      - name: Write kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
 
-      - name: Install dependencies
-        run: pip install -r ml/requirements.txt
+      - name: Delete old job
+        run: kubectl delete job ml-train -n geo-mlops --ignore-not-found
 
-      - name: Train model
-        working-directory: ml
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: python -m training.train
+      - name: Submit training job
+        run: |
+          kubectl apply -f - <<EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ml-train
+            namespace: geo-mlops
+          spec:
+            ttlSecondsAfterFinished: 3600
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: trainer
+                    image: ghcr.io/rsmrtk/geo-mlops-ml:latest
+                    command: ["python", "-m", "training.train"]
+                    env:
+                      - name: MLFLOW_TRACKING_URI
+                        value: "http://mlflow:5000"
+                      - name: MODEL_NAME
+                        value: "location-classifier"
+                    resources:
+                      requests:
+                        cpu: 500m
+                        memory: 512Mi
+          EOF
+
+      - name: Wait for training to complete
+        run: |
+          kubectl wait job/ml-train -n geo-mlops \
+            --for=condition=complete \
+            --timeout=600s
+
+      - name: Show logs
+        run: kubectl logs -n geo-mlops -l job-name=ml-train --tail=50
 
       - name: Promote to Production
         if: ${{ inputs.promote == 'true' }}
-        working-directory: ml
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-        run: python -m training.promote
+        run: |
+          kubectl apply -f - <<EOF
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: ml-promote
+            namespace: geo-mlops
+          spec:
+            ttlSecondsAfterFinished: 600
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: promoter
+                    image: ghcr.io/rsmrtk/geo-mlops-ml:latest
+                    command: ["python", "-m", "training.promote"]
+                    env:
+                      - name: MLFLOW_TRACKING_URI
+                        value: "http://mlflow:5000"
+          EOF
+          kubectl wait job/ml-promote -n geo-mlops \
+            --for=condition=complete \
+            --timeout=120s
+          kubectl logs -n geo-mlops -l job-name=ml-promote
