@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -13,8 +14,25 @@ func main() {
 	nominatimURL := envOrDefault("NOMINATIM_URL", "https://nominatim.openstreetmap.org")
 	mlURL := envOrDefault("ML_SVC_URL", "http://ml-svc:5001")
 	addr := envOrDefault("ADDR", ":8080")
+	databaseURL := os.Getenv("DATABASE_URL")
 
-	g := geocoder.New(nominatimURL, mlURL)
+	ctx := context.Background()
+
+	var g *geocoder.Geocoder
+	if databaseURL != "" {
+		cache, err := geocoder.NewCache(ctx, databaseURL)
+		if err != nil {
+			log.Printf("warn: could not connect to postgres, running without cache: %v", err)
+			g = geocoder.New(nominatimURL, mlURL)
+		} else {
+			defer cache.Close()
+			g = geocoder.NewWithCache(nominatimURL, mlURL, cache)
+			log.Println("postgres cache enabled")
+		}
+	} else {
+		g = geocoder.New(nominatimURL, mlURL)
+		log.Println("running without cache (DATABASE_URL not set)")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/geocode", handleGeocode(g))
@@ -57,4 +75,3 @@ func envOrDefault(key, def string) string {
 	}
 	return def
 }
-

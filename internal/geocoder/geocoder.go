@@ -16,12 +16,14 @@ type Location struct {
 	LocationType string  `json:"location_type"`
 	Confidence   float64 `json:"confidence"`
 	LatencyMS    int64   `json:"latency_ms"`
+	CacheHit     bool    `json:"cache_hit"`
 }
 
 // Geocoder resolves coordinates to a full Location.
 type Geocoder struct {
 	nominatim *NominatimClient
 	mlClient  *MLClient
+	cache     *Cache // nil = no caching
 }
 
 func New(nominatimURL, mlURL string) *Geocoder {
@@ -31,10 +33,29 @@ func New(nominatimURL, mlURL string) *Geocoder {
 	}
 }
 
+func NewWithCache(nominatimURL, mlURL string, cache *Cache) *Geocoder {
+	return &Geocoder{
+		nominatim: NewNominatimClient(nominatimURL),
+		mlClient:  NewMLClient(mlURL),
+		cache:     cache,
+	}
+}
+
 func (g *Geocoder) Lookup(ctx context.Context, lat, lng float64) (*Location, error) {
 	start := time.Now()
 
 	cellID, level := S2CellFromLatLng(lat, lng)
+
+	if g.cache != nil {
+		if cached, err := g.cache.Get(ctx, cellID); err == nil && cached != nil {
+			cached.Lat = lat
+			cached.Lng = lng
+			cached.S2Level = level
+			cached.LatencyMS = time.Since(start).Milliseconds()
+			cached.CacheHit = true
+			return cached, nil
+		}
+	}
 
 	address, err := g.nominatim.ReverseGeocode(ctx, lat, lng)
 	if err != nil {
@@ -43,12 +64,11 @@ func (g *Geocoder) Lookup(ctx context.Context, lat, lng float64) (*Location, err
 
 	locType, confidence, err := g.mlClient.Classify(ctx, lat, lng)
 	if err != nil {
-		// ML failure is non-fatal — return result without classification
 		locType = "unknown"
 		confidence = 0
 	}
 
-	return &Location{
+	loc := &Location{
 		Lat:          lat,
 		Lng:          lng,
 		Address:      address,
@@ -57,5 +77,13 @@ func (g *Geocoder) Lookup(ctx context.Context, lat, lng float64) (*Location, err
 		LocationType: locType,
 		Confidence:   confidence,
 		LatencyMS:    time.Since(start).Milliseconds(),
-	}, nil
+		CacheHit:     false,
+	}
+
+	if g.cache != nil {
+		// best-effort — don't fail the request if cache write fails
+		_ = g.cache.Set(ctx, cellID, loc)
+	}
+
+	return loc, nil
 }
