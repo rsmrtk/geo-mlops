@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 MODEL_NAME = os.getenv("MODEL_NAME", "location-classifier")
-MODEL_STAGE = os.getenv("MODEL_STAGE", "Production")
+MODEL_ALIAS = os.getenv("MODEL_ALIAS", "champion")
 
 model = None
 
@@ -20,7 +20,7 @@ model = None
 async def lifespan(app: FastAPI):
     global model
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    model_uri = f"models:/{MODEL_NAME}/{MODEL_STAGE}"
+    model_uri = f"models:/{MODEL_NAME}@{MODEL_ALIAS}"
     logger.info("loading model from %s", model_uri)
     try:
         model = mlflow.pyfunc.load_model(model_uri)

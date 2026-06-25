@@ -1,9 +1,11 @@
 """
-Promote the latest Staging model version to Production in MLflow Model Registry.
+Promote the latest model version to Production in MLflow Model Registry.
+
+Uses aliases (champion) instead of deprecated stages.
 
 Usage:
     python -m training.promote
-    python -m training.promote --version 3   # promote specific version
+    python -m training.promote --version 3
 """
 
 import argparse
@@ -25,19 +27,19 @@ def promote(version: int | None = None) -> None:
     client = MlflowClient()
 
     if version is None:
-        staging = client.get_latest_versions(MODEL_NAME, stages=["Staging"])
-        if not staging:
-            raise RuntimeError(f"no Staging version found for '{MODEL_NAME}'")
-        version = int(staging[0].version)
-        logger.info("latest Staging version: %d", version)
+        versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+        if not versions:
+            raise RuntimeError(f"no versions found for '{MODEL_NAME}'")
+        # get latest version by version number
+        version = max(int(v.version) for v in versions)
+        logger.info("latest version: %d", version)
 
-    client.transition_model_version_stage(
+    client.set_registered_model_alias(
         name=MODEL_NAME,
+        alias="champion",
         version=str(version),
-        stage="Production",
-        archive_existing_versions=True,
     )
-    logger.info("version %d promoted to Production", version)
+    logger.info("version %d set as alias 'champion' (Production)", version)
 
 
 if __name__ == "__main__":
