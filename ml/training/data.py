@@ -12,7 +12,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
 
 # OSM tags → our location_type labels
 TAG_QUERIES = {
@@ -45,11 +49,17 @@ def _fetch_label(label: str, query: str, limit: int = 200) -> list[Sample]:
     );
     out center {limit};
     """
-    try:
-        resp = requests.post(OVERPASS_URL, data={"data": overpass_query}, timeout=30)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        logger.warning("overpass error for %s: %s", label, e)
+    headers = {"User-Agent": "geo-mlops/1.0 (https://github.com/rsmrtk/geo-mlops)"}
+    for url in OVERPASS_URLS:
+        try:
+            resp = requests.post(url, data={"data": overpass_query},
+                                 headers=headers, timeout=30)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as e:
+            logger.warning("overpass error for %s at %s: %s", label, url, e)
+            time.sleep(2)
+    else:
         return []
 
     samples = []
