@@ -58,7 +58,13 @@ jobs:
         run: |
           kubectl wait job/ml-train -n geo-mlops \
             --for=condition=complete \
+            --for=condition=failed \
             --timeout=600s
+          if kubectl get job ml-train -n geo-mlops -o jsonpath='{.status.conditions[?(@.type=="Failed")].type}' | grep -q Failed; then
+            echo "Training job FAILED"
+            kubectl logs -n geo-mlops -l job-name=ml-train --tail=100
+            exit 1
+          fi
 
       - name: Show logs
         run: kubectl logs -n geo-mlops -l job-name=ml-train --tail=50
@@ -66,6 +72,7 @@ jobs:
       - name: Promote to Production
         if: ${{ inputs.promote == 'true' }}
         run: |
+          kubectl delete job ml-promote -n geo-mlops --ignore-not-found
           kubectl apply -f - <<EOF
           apiVersion: batch/v1
           kind: Job
@@ -87,5 +94,11 @@ jobs:
           EOF
           kubectl wait job/ml-promote -n geo-mlops \
             --for=condition=complete \
+            --for=condition=failed \
             --timeout=120s
+          if kubectl get job ml-promote -n geo-mlops -o jsonpath='{.status.conditions[?(@.type=="Failed")].type}' | grep -q Failed; then
+            echo "Promote job FAILED"
+            kubectl logs -n geo-mlops -l job-name=ml-promote --tail=100
+            exit 1
+          fi
           kubectl logs -n geo-mlops -l job-name=ml-promote
