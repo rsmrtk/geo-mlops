@@ -23,6 +23,13 @@ jobs:
           echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
 
+      - name: Sync GCS secret
+        run: |
+          kubectl create secret generic mlflow-gcs-key \
+            -n geo-mlops \
+            --from-literal=key.json="$(echo "${{ secrets.MLFLOW_GCS_KEY_B64 }}" | base64 -d)" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Delete old job
         run: kubectl delete job ml-train -n geo-mlops --ignore-not-found
 
