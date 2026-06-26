@@ -56,12 +56,24 @@ jobs:
 
       - name: Wait for training to complete
         run: |
-          kubectl wait job/ml-train -n geo-mlops \
-            --for=condition=complete \
-            --for=condition=failed \
-            --timeout=600s
-          if kubectl get job ml-train -n geo-mlops -o jsonpath='{.status.conditions[?(@.type=="Failed")].type}' | grep -q Failed; then
-            echo "Training job FAILED"
+          echo "Waiting for ml-train job..."
+          for i in $(seq 1 60); do
+            STATUS=$(kubectl get job ml-train -n geo-mlops \
+              -o jsonpath='{.status.conditions[*].type}' 2>/dev/null)
+            if echo "$STATUS" | grep -q "Complete"; then
+              echo "Job completed successfully"
+              break
+            fi
+            if echo "$STATUS" | grep -q "Failed"; then
+              echo "Training job FAILED. Logs:"
+              kubectl logs -n geo-mlops -l job-name=ml-train --tail=100
+              exit 1
+            fi
+            echo "[$i/60] still running..."
+            sleep 10
+          done
+          if ! echo "$STATUS" | grep -q "Complete"; then
+            echo "Timed out after 600s. Logs:"
             kubectl logs -n geo-mlops -l job-name=ml-train --tail=100
             exit 1
           fi
@@ -92,12 +104,24 @@ jobs:
                       - name: MLFLOW_TRACKING_URI
                         value: "http://mlflow:5000"
           EOF
-          kubectl wait job/ml-promote -n geo-mlops \
-            --for=condition=complete \
-            --for=condition=failed \
-            --timeout=120s
-          if kubectl get job ml-promote -n geo-mlops -o jsonpath='{.status.conditions[?(@.type=="Failed")].type}' | grep -q Failed; then
-            echo "Promote job FAILED"
+          echo "Waiting for ml-promote job..."
+          for i in $(seq 1 12); do
+            STATUS=$(kubectl get job ml-promote -n geo-mlops \
+              -o jsonpath='{.status.conditions[*].type}' 2>/dev/null)
+            if echo "$STATUS" | grep -q "Complete"; then
+              echo "Promote completed successfully"
+              break
+            fi
+            if echo "$STATUS" | grep -q "Failed"; then
+              echo "Promote job FAILED. Logs:"
+              kubectl logs -n geo-mlops -l job-name=ml-promote --tail=100
+              exit 1
+            fi
+            echo "[$i/12] still running..."
+            sleep 10
+          done
+          if ! echo "$STATUS" | grep -q "Complete"; then
+            echo "Timed out after 120s. Logs:"
             kubectl logs -n geo-mlops -l job-name=ml-promote --tail=100
             exit 1
           fi
