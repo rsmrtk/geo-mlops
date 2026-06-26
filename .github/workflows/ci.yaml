@@ -98,10 +98,17 @@ jobs:
           token: ${{ secrets.INFRA_REPO_TOKEN }}
           path: infra
 
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
       - name: Update image tags in prod values
         run: |
           TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
-          sed -i "s|tag: sha-.*|tag: ${TAG}|g" infra/envs/prod/values.yaml
+          yq -i ".geocoder.image.tag = \"${TAG}\"" infra/envs/prod/values.yaml
+          yq -i ".\"ml-svc\".image.tag = \"${TAG}\"" infra/envs/prod/values.yaml
 
       - name: Commit and push
         run: |
